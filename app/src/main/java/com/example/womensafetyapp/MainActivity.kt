@@ -1,4 +1,9 @@
 package com.example.womensafetyapp
+import android.Manifest
+import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationManager
+import androidx.core.app.ActivityCompat
 
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -26,14 +31,23 @@ class MainActivity : AppCompatActivity() {
 
     // Use your ngrok URL or local IP if same Wi-Fi
     //private val serverUrl = "https://YOUR_NGROK_URL/predict"
-   // private val serverUrl = "http://192.168.29.158:5000/predict"
+    // private val serverUrl = "http://192.168.29.158:5000/predict"
     private val serverUrl = "https://unparcelled-eldon-nonglandular.ngrok-free.dev/predict"
 
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-
+        // Request location permission
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
+                1
+            )
+        }
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
         accelerometer?.also { accel ->
@@ -65,27 +79,45 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun sendSOS(x: Float, y: Float, z: Float) {
+
+        // 1️⃣ Get location (may be "Unknown")
+        val location = getLocation()  // <-- you already created this earlier
+
+        // 2️⃣ Create JSON payload
         val json = JSONObject()
+
         val motionArray = JSONArray()
         motionArray.put(JSONArray().put(x).put(y).put(z))
+
         json.put("window", motionArray)
+        json.put("location", location)   // <-- NEW FIELD
 
         val requestBody = json.toString()
 
+        // 3️⃣ Send request in thread
         Thread {
             try {
                 val client = OkHttpClient()
                 val mediaType = "application/json; charset=utf-8".toMediaType()
                 val body = requestBody.toRequestBody(mediaType)
-                val request = Request.Builder().url(serverUrl).post(body).build()
+
+                val request = Request.Builder()
+                    .url(serverUrl)
+                    .post(body)
+                    .build()
+
                 val response = client.newCall(request).execute()
                 val resString = response.body?.string()
-                println("Server Response: $resString")
 
-                // Optional: show toast on main thread
+                println("🔥 SOS SENT TO SERVER")
+                println("📌 Motion: x=$x  y=$y  z=$z")
+                println("📌 Location: $location")
+                println("📌 Server Response: $resString")
+
                 runOnUiThread {
                     Toast.makeText(this@MainActivity, "SOS Sent!", Toast.LENGTH_SHORT).show()
                 }
+
             } catch (e: Exception) {
                 e.printStackTrace()
                 runOnUiThread {
@@ -95,8 +127,30 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
+
     override fun onDestroy() {
         super.onDestroy()
         sensorManager.unregisterListener(sensorListener)
     }
+    private fun getLocation(): String {
+        val locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
+
+        val hasFine = ActivityCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (!hasFine) return "unknown"
+
+        val location: Location? =
+            locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                ?: locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+
+        return if (location != null) {
+            "${location.latitude},${location.longitude}"
+        } else {
+            "unknown"
+        }
+    }
+
 }
